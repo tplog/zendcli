@@ -5,25 +5,15 @@
 
 import { getConfig } from "./config";
 
-/** Make an authenticated GET request to the Zendesk API. */
-export async function apiGet<T = any>(
-  path: string,
-  params?: Record<string, string | number>
-): Promise<T> {
-  const { subdomain, email, api_token } = getConfig();
-  const url = new URL(`https://${subdomain}.zendesk.com${path}`);
-
-  if (params) {
-    for (const [key, value] of Object.entries(params)) {
-      url.searchParams.set(key, String(value));
-    }
-  }
-
-  // Zendesk token auth: Base64({email}/token:{api_token})
+function getAuthHeader(): string {
+  const { email, api_token } = getConfig();
   const credentials = btoa(`${email}/token:${api_token}`);
+  return `Basic ${credentials}`;
+}
 
-  const resp = await fetch(url.toString(), {
-    headers: { Authorization: `Basic ${credentials}` },
+async function fetchJson<T>(url: string): Promise<T> {
+  const resp = await fetch(url, {
+    headers: { Authorization: getAuthHeader() },
   });
 
   if (!resp.ok) {
@@ -33,4 +23,26 @@ export async function apiGet<T = any>(
   }
 
   return resp.json();
+}
+
+/** Make an authenticated GET request to the Zendesk API. */
+export async function apiGet<T = any>(
+  path: string,
+  params?: Record<string, string | number>
+): Promise<T> {
+  const { subdomain } = getConfig();
+  const url = new URL(`https://${subdomain}.zendesk.com${path}`);
+
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  return fetchJson<T>(url.toString());
+}
+
+/** Make an authenticated GET request to a full Zendesk URL. */
+export async function apiGetUrl<T = any>(url: string): Promise<T> {
+  return fetchJson<T>(url);
 }

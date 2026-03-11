@@ -39,11 +39,18 @@ Environment variables take precedence over the config file.
 ## Usage
 
 ```bash
+zend --help
+zend tickets --help
+zend email --help
+zend follower --help
+zend comments --help
 zend tickets --limit 10
 zend tickets --status open --limit 20
 zend email user@example.com
 zend email user@example.com --status unresolved
 zend email user@example.com --status open,pending
+zend follower
+zend follower foo@example.com --limit 3
 zend comments 12345
 zend comments 12345 --type public
 zend comments 12345 --json

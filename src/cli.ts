@@ -1,20 +1,33 @@
 /**
  * zendcli - Minimal Zendesk CLI for tickets and comments.
- *
- * Wraps two Zendesk Support API endpoints:
- *   - GET /api/v2/tickets              (list tickets)
- *   - GET /api/v2/tickets/{id}/comments (list ticket comments/thread)
  */
 
 import { Command } from "commander";
 import * as readline from "readline";
-import { loadConfig, saveConfig } from "./config";
-import { apiGet } from "./api";
+import { getConfig, loadConfig, saveConfig } from "./config";
+import { apiGet, apiGetUrl } from "./api";
 
 const program = new Command();
 const VALID_TICKET_STATUSES = ["new", "open", "pending", "hold", "solved", "closed"];
 
 program.name("zend").description("Zendesk tickets & comments CLI").version("0.1.0");
+
+type Ticket = {
+  id: number;
+  status?: string;
+  subject?: string;
+  priority?: string | null;
+  type?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  assignee_id?: number | null;
+  follower_ids?: number[];
+};
+
+type SearchResponse = {
+  results: Ticket[];
+  next_page?: string | null;
+};
 
 /** Interactive prompt helper. */
 function prompt(question: string, defaultValue = ""): Promise<string> {
@@ -92,6 +105,81 @@ function parseStatusFilter(input?: string): string[] {
   return statuses;
 }
 
+function buildSearchQuery(base: string, rawStatus: string, statusFilter: string[], canUseSearchStatus: boolean): string {
+  let query = base;
+
+  if (rawStatus === "unresolved") {
+    query += " status<solved";
+  } else if (canUseSearchStatus && statusFilter.length === 1) {
+    query += ` status:${statusFilter[0]}`;
+  }
+
+  return query;
+}
+
+function printTickets(tickets: Ticket[], meta: (ticket: Ticket) => string): void {
+  for (const t of tickets) {
+    const status = (t.status || "").padEnd(8);
+    const subject = t.subject || "(no subject)";
+    console.log(`[${t.id}] ${status} ${subject}`);
+    console.log(meta(t));
+    console.log();
+  }
+}
+
+async function findUserByEmail(email: string): Promise<{ id: number; email: string }> {
+  const data = await apiGet<{ users: Array<{ id: number; email: string }> }>("/api/v2/users/search.json", {
+    query: email,
+  });
+
+  const user = (data.users || []).find((item) => item.email?.toLowerCase() === email.toLowerCase()) || data.users?.[0];
+  if (!user) {
+    console.error(`No Zendesk user found for email: ${email}`);
+    process.exit(1);
+  }
+
+  return user;
+}
+
+async function findFollowerTickets(email: string, rawStatus: string, limit: number, sort: string): Promise<Ticket[]> {
+  const user = await findUserByEmail(email);
+  const statusFilter = parseStatusFilter(rawStatus);
+  const canUseSearchStatus = rawStatus === "unresolved" || statusFilter.length === 1;
+  let url: string | null = new URL(`https://${getConfig().subdomain}.zendesk.com/api/v2/search.json`).toString();
+  const params = new URLSearchParams({
+    query: buildSearchQuery("type:ticket", rawStatus, statusFilter, canUseSearchStatus),
+    sort_by: "updated_at",
+    sort_order: sort,
+    per_page: "100",
+  });
+  url += `?${params.toString()}`;
+
+  const matches: Ticket[] = [];
+
+  while (url && matches.length < limit) {
+    const data = await apiGetUrl<SearchResponse>(url);
+    let tickets = data.results || [];
+
+    if (statusFilter.length > 0 && rawStatus !== "unresolved" && !canUseSearchStatus) {
+      tickets = tickets.filter((ticket) => statusFilter.includes((ticket.status || "").toLowerCase()));
+    }
+
+    for (const ticket of tickets) {
+      const followers = ticket.follower_ids || [];
+      if (followers.includes(user.id) && ticket.assignee_id !== user.id) {
+        matches.push(ticket);
+      }
+      if (matches.length >= limit) {
+        break;
+      }
+    }
+
+    url = data.next_page || null;
+  }
+
+  return matches;
+}
+
 // --- configure ---
 program
   .command("configure")
@@ -120,7 +208,7 @@ program
   .option("--sort <order>", "Sort order (asc|desc)", "desc")
   .action(async (opts) => {
     const limit = parseInt(opts.limit, 10);
-    const data = await apiGet<{ tickets: any[] }>("/api/v2/tickets.json", {
+    const data = await apiGet<{ tickets: Ticket[] }>("/api/v2/tickets.json", {
       per_page: Math.min(limit, 100),
       sort_order: opts.sort,
       sort_by: "updated_at",
@@ -131,13 +219,9 @@ program
       tickets = tickets.filter((t) => t.status === opts.status);
     }
 
-    for (const t of tickets.slice(0, limit)) {
-      const status = (t.status || "").padEnd(8);
-      const subject = t.subject || "(no subject)";
-      console.log(`[${t.id}] ${status} ${subject}`);
-      console.log(`    priority=${t.priority ?? "-"}  type=${t.type ?? "-"}  created=${t.created_at}`);
-      console.log();
-    }
+    printTickets(tickets.slice(0, limit), (ticket) => {
+      return `    priority=${ticket.priority ?? "-"}  type=${ticket.type ?? "-"}  created=${ticket.created_at}`;
+    });
   });
 
 // --- email ---
@@ -152,15 +236,9 @@ program
     const limit = parseInt(opts.limit, 10);
     const statusFilter = parseStatusFilter(opts.status);
     const canUseSearchStatus = opts.status === "unresolved" || statusFilter.length === 1;
-    let query = `type:ticket requester:${email}`;
+    const query = buildSearchQuery(`type:ticket requester:${email}`, opts.status, statusFilter, canUseSearchStatus);
 
-    if (opts.status === "unresolved") {
-      query += " status<solved";
-    } else if (canUseSearchStatus && statusFilter.length === 1) {
-      query += ` status:${statusFilter[0]}`;
-    }
-
-    const data = await apiGet<{ results: any[] }>("/api/v2/search.json", {
+    const data = await apiGet<{ results: Ticket[] }>("/api/v2/search.json", {
       query,
       sort_by: "updated_at",
       sort_order: opts.sort,
@@ -179,13 +257,32 @@ program
       return;
     }
 
-    for (const t of tickets) {
-      const status = (t.status || "").padEnd(8);
-      const subject = t.subject || "(no subject)";
-      console.log(`[${t.id}] ${status} ${subject}`);
-      console.log(`    priority=${t.priority ?? "-"}  type=${t.type ?? "-"}  requester=${email}  updated=${t.updated_at}`);
-      console.log();
+    printTickets(tickets, (ticket) => {
+      return `    priority=${ticket.priority ?? "-"}  type=${ticket.type ?? "-"}  requester=${email}  updated=${ticket.updated_at}`;
+    });
+  });
+
+// --- follower ---
+program
+  .command("follower [email]")
+  .description("Find tickets where the user is a follower but not the assignee")
+  .option("--status <status>", "Filter status: unresolved|all|new|open|pending|hold|solved|closed or comma-separated list", "unresolved")
+  .option("--limit <n>", "Max tickets to return", "20")
+  .option("--sort <order>", "Sort order (asc|desc)", "desc")
+  .option("--json", "Output raw JSON")
+  .action(async (email, opts) => {
+    const targetEmail = email || getConfig().email;
+    const limit = parseInt(opts.limit, 10);
+    const tickets = await findFollowerTickets(targetEmail, opts.status, limit, opts.sort);
+
+    if (opts.json) {
+      console.log(JSON.stringify(tickets, null, 2));
+      return;
     }
+
+    printTickets(tickets, (ticket) => {
+      return `    priority=${ticket.priority ?? "-"}  type=${ticket.type ?? "-"}  follower=${targetEmail}  assignee=${ticket.assignee_id ?? "-"}  updated=${ticket.updated_at}`;
+    });
   });
 
 // --- comments ---
