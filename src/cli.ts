@@ -1,35 +1,80 @@
-/**
- * zendcli - Minimal Zendesk CLI for tickets and comments.
- */
-
 import { Command } from "commander";
 import * as readline from "readline";
+import { ApiError, apiGet, apiGetUrl } from "./api";
 import { getConfig, loadConfig, saveConfig } from "./config";
-import { apiGet, apiGetUrl } from "./api";
 
 const program = new Command();
 const VALID_TICKET_STATUSES = ["new", "open", "pending", "hold", "solved", "closed"];
+const KNOWN_COMMANDS = new Set(["configure", "follower", "comments", "help", "email", "ticket"]);
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DIGITS_RE = /^\d+$/;
 
-program.name("zend").description("Zendesk tickets & comments CLI").version("0.1.0");
-
-type Ticket = {
+type SearchTicket = Record<string, unknown> & {
   id: number;
   status?: string;
-  subject?: string;
-  priority?: string | null;
-  type?: string | null;
-  created_at?: string;
-  updated_at?: string;
   assignee_id?: number | null;
   follower_ids?: number[];
 };
 
-type SearchResponse = {
-  results: Ticket[];
-  next_page?: string | null;
+type User = {
+  id: number;
+  email?: string;
 };
 
-/** Interactive prompt helper. */
+class CliError extends Error {
+  code: string;
+  details: Record<string, unknown>;
+  exitCode: number;
+
+  constructor(code: string, message: string, details: Record<string, unknown> = {}, exitCode = 1) {
+    super(message);
+    this.name = "CliError";
+    this.code = code;
+    this.details = details;
+    this.exitCode = exitCode;
+  }
+}
+
+program.name("zend").description("Zendesk tickets CLI").version("2.0.0");
+
+function printJson(value: unknown): void {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function fail(code: string, message: string, details: Record<string, unknown> = {}, exitCode = 1): never {
+  printJson({ error: code, message, ...details });
+  process.exit(exitCode);
+}
+
+function handleError(error: unknown): never {
+  if (error instanceof CliError) {
+    fail(error.code, error.message, error.details, error.exitCode);
+  }
+
+  if (error instanceof ApiError) {
+    if (error.status === 401) {
+      fail("auth_failed", "401 Unauthorized", { status: 401 });
+    }
+    if (error.status === 404) {
+      fail("not_found", "Resource not found", { status: 404 });
+    }
+    fail("api_error", error.body || error.message, error.status ? { status: error.status } : {});
+  }
+
+  const message = error instanceof Error ? error.message : "Unknown error";
+  fail("unknown_error", message);
+}
+
+function run<T extends unknown[]>(fn: (...args: T) => Promise<void> | void) {
+  return async (...args: T): Promise<void> => {
+    try {
+      await fn(...args);
+    } catch (error) {
+      handleError(error);
+    }
+  };
+}
+
 function prompt(question: string, defaultValue = ""): Promise<string> {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
@@ -48,20 +93,15 @@ function promptHidden(question: string, hasDefault = false): Promise<string> {
     let value = "";
 
     readline.emitKeypressEvents(stdin);
-    if (stdin.isTTY) {
-      stdin.setRawMode(true);
-    }
+    if (stdin.isTTY) stdin.setRawMode(true);
 
-    const suffix = hasDefault ? " [****]" : "";
-    stdout.write(`${question}${suffix}: `);
+    stdout.write(`${question}${hasDefault ? " [****]" : ""}: `);
 
     const onKeypress = (char: string, key: readline.Key) => {
       if (key.name === "return" || key.name === "enter") {
         stdout.write("\n");
         stdin.off("keypress", onKeypress);
-        if (stdin.isTTY) {
-          stdin.setRawMode(false);
-        }
+        if (stdin.isTTY) stdin.setRawMode(false);
         resolve(value);
         return;
       }
@@ -69,9 +109,7 @@ function promptHidden(question: string, hasDefault = false): Promise<string> {
       if (key.ctrl && key.name === "c") {
         stdout.write("\n");
         stdin.off("keypress", onKeypress);
-        if (stdin.isTTY) {
-          stdin.setRawMode(false);
-        }
+        if (stdin.isTTY) stdin.setRawMode(false);
         process.exit(130);
       }
 
@@ -80,24 +118,19 @@ function promptHidden(question: string, hasDefault = false): Promise<string> {
         return;
       }
 
-      if (char) {
-        value += char;
-      }
+      if (char) value += char;
     };
 
     stdin.on("keypress", onKeypress);
   });
 }
 
-function parseStatusFilter(input?: string): string[] {
-  if (!input) return [];
+function parseStatusFilter(input = "unresolved"): string[] {
   const statuses = input.split(",").map((value) => value.trim().toLowerCase()).filter(Boolean);
   const invalid = statuses.filter((status) => status !== "unresolved" && status !== "all" && !VALID_TICKET_STATUSES.includes(status));
 
   if (invalid.length > 0) {
-    console.error(`Invalid status value(s): ${invalid.join(", ")}`);
-    console.error(`Allowed values: unresolved, all, ${VALID_TICKET_STATUSES.join(", ")}`);
-    process.exit(1);
+    throw new CliError("invalid_args", `Invalid status value(s): ${invalid.join(", ")}`, { input });
   }
 
   if (statuses.includes("all")) return [];
@@ -105,89 +138,85 @@ function parseStatusFilter(input?: string): string[] {
   return statuses;
 }
 
-function buildSearchQuery(base: string, rawStatus: string, statusFilter: string[], canUseSearchStatus: boolean): string {
-  let query = base;
-
-  if (rawStatus === "unresolved") {
-    query += " status<solved";
-  } else if (canUseSearchStatus && statusFilter.length === 1) {
-    query += ` status:${statusFilter[0]}`;
+function parseLimit(input = "20"): number {
+  const limit = Number.parseInt(input, 10);
+  if (!Number.isFinite(limit) || Number.isNaN(limit)) {
+    throw new CliError("invalid_args", "limit must be an integer", { limit: input });
   }
-
-  return query;
+  if (limit < 1 || limit > 100) {
+    throw new CliError("invalid_args", "limit must be between 1 and 100", { limit });
+  }
+  return limit;
 }
 
-function printTickets(tickets: Ticket[], meta: (ticket: Ticket) => string): void {
-  for (const t of tickets) {
-    const status = (t.status || "").padEnd(8);
-    const subject = t.subject || "(no subject)";
-    console.log(`[${t.id}] ${status} ${subject}`);
-    console.log(meta(t));
-    console.log();
+function parseSort(input = "desc"): "asc" | "desc" {
+  if (input !== "asc" && input !== "desc") {
+    throw new CliError("invalid_args", "sort must be asc or desc", { sort: input });
   }
+  return input;
 }
 
-async function findUserByEmail(email: string): Promise<{ id: number; email: string }> {
-  const data = await apiGet<{ users: Array<{ id: number; email: string }> }>("/api/v2/users/search.json", {
-    query: email,
-  });
-
-  const user = (data.users || []).find((item) => item.email?.toLowerCase() === email.toLowerCase()) || data.users?.[0];
-  if (!user) {
-    console.error(`No Zendesk user found for email: ${email}`);
-    process.exit(1);
-  }
-
-  return user;
+function buildSearchQuery(base: string, rawStatus: string, statusFilter: string[]): string {
+  if (rawStatus === "unresolved") return `${base} status<solved`;
+  if (statusFilter.length === 1) return `${base} status:${statusFilter[0]}`;
+  return base;
 }
 
-async function findFollowerTickets(email: string, rawStatus: string, limit: number, sort: string): Promise<Ticket[]> {
+function filterStatuses(tickets: SearchTicket[], rawStatus: string, statusFilter: string[]): SearchTicket[] {
+  if (rawStatus === "unresolved" || statusFilter.length <= 1) return tickets;
+  return tickets.filter((ticket) => statusFilter.includes(String(ticket.status || "").toLowerCase()));
+}
+
+async function findUserByEmail(email: string): Promise<User> {
+  const data = await apiGet<{ users?: User[] }>("/api/v2/users/search.json", { query: email });
+  const users = data.users || [];
+  const exact = users.find((user) => user.email?.toLowerCase() === email.toLowerCase());
+  if (exact) return exact;
+  if (users[0]) return users[0];
+  throw new CliError("user_not_found", `No Zendesk user found for email: ${email}`, { email });
+}
+
+async function fetchFollowerTickets(email: string, rawStatus: string, limit: number, sort: "asc" | "desc"): Promise<SearchTicket[]> {
   const user = await findUserByEmail(email);
   const statusFilter = parseStatusFilter(rawStatus);
-  const canUseSearchStatus = rawStatus === "unresolved" || statusFilter.length === 1;
-  let url: string | null = new URL(`https://${getConfig().subdomain}.zendesk.com/api/v2/search.json`).toString();
-  const params = new URLSearchParams({
-    query: buildSearchQuery("type:ticket", rawStatus, statusFilter, canUseSearchStatus),
-    sort_by: "updated_at",
-    sort_order: sort,
-    per_page: "100",
-  });
-  url += `?${params.toString()}`;
+  const baseUrl = new URL(`${apiBaseUrl()}/api/v2/search.json`);
+  baseUrl.searchParams.set("query", buildSearchQuery("type:ticket", rawStatus, statusFilter));
+  baseUrl.searchParams.set("sort_by", "updated_at");
+  baseUrl.searchParams.set("sort_order", sort);
+  baseUrl.searchParams.set("per_page", "100");
 
-  const matches: Ticket[] = [];
+  const matches: SearchTicket[] = [];
+  let nextUrl: string | null = baseUrl.toString();
 
-  while (url && matches.length < limit) {
-    const data = await apiGetUrl<SearchResponse>(url);
-    let tickets = data.results || [];
-
-    if (statusFilter.length > 0 && rawStatus !== "unresolved" && !canUseSearchStatus) {
-      tickets = tickets.filter((ticket) => statusFilter.includes((ticket.status || "").toLowerCase()));
-    }
+  while (nextUrl && matches.length < limit) {
+    const data = await apiGetUrl<{ results?: SearchTicket[]; next_page?: string | null }>(nextUrl);
+    const tickets = filterStatuses(data.results || [], rawStatus, statusFilter);
 
     for (const ticket of tickets) {
-      const followers = ticket.follower_ids || [];
-      if (followers.includes(user.id) && ticket.assignee_id !== user.id) {
+      if ((ticket.follower_ids || []).includes(user.id) && ticket.assignee_id !== user.id) {
         matches.push(ticket);
       }
-      if (matches.length >= limit) {
-        break;
-      }
+      if (matches.length >= limit) break;
     }
 
-    url = data.next_page || null;
+    nextUrl = data.next_page || null;
   }
 
   return matches;
 }
 
-// --- configure ---
+function apiBaseUrl(): string {
+  const { subdomain } = getConfig();
+  return `https://${subdomain}.zendesk.com`;
+}
+
 program
   .command("configure")
   .description("Set up Zendesk credentials interactively")
-  .action(async () => {
+  .action(run(async () => {
     const existing = loadConfig();
-    console.error("Zendesk CLI Configuration");
-    console.error("─".repeat(30));
+    process.stderr.write("Zendesk CLI Configuration\n");
+    process.stderr.write(`${"─".repeat(30)}\n`);
 
     const subdomain = await prompt("Subdomain (xxx.zendesk.com)", existing.subdomain);
     const email = await prompt("Email", existing.email);
@@ -195,129 +224,97 @@ program
     const api_token = tokenInput || existing.api_token || "";
 
     saveConfig({ subdomain, email, api_token });
-    console.error("\nSaved to ~/.zendcli/config.json with restricted permissions (0600)");
-    console.error("Environment variables also work: ZENDESK_SUBDOMAIN, ZENDESK_EMAIL, ZENDESK_API_TOKEN");
-  });
+    printJson({ ok: true });
+  }));
 
-// --- tickets ---
 program
-  .command("tickets")
-  .description("List tickets from Zendesk, sorted by updated_at")
-  .option("--status <status>", "Filter by status (new|open|pending|hold|solved|closed)")
-  .option("--limit <n>", "Max tickets to return", "20")
-  .option("--sort <order>", "Sort order (asc|desc)", "desc")
-  .action(async (opts) => {
-    const limit = parseInt(opts.limit, 10);
-    const data = await apiGet<{ tickets: Ticket[] }>("/api/v2/tickets.json", {
-      per_page: Math.min(limit, 100),
-      sort_order: opts.sort,
-      sort_by: "updated_at",
-    });
-
-    let tickets = data.tickets || [];
-    if (opts.status) {
-      tickets = tickets.filter((t) => t.status === opts.status);
+  .command("ticket <id>")
+  .description("Get a single ticket")
+  .action(run(async (id: string) => {
+    if (!DIGITS_RE.test(id)) {
+      throw new CliError("invalid_args", "ticket id must be numeric", { id });
     }
 
-    printTickets(tickets.slice(0, limit), (ticket) => {
-      return `    priority=${ticket.priority ?? "-"}  type=${ticket.type ?? "-"}  created=${ticket.created_at}`;
-    });
-  });
+    try {
+      const data = await apiGet<{ ticket?: Record<string, unknown> }>(`/api/v2/tickets/${id}.json`);
+      if (!data.ticket) {
+        throw new CliError("not_found", `Ticket ${id} not found`, { id: Number(id) });
+      }
+      printJson(data.ticket);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        fail("not_found", `Ticket ${id} not found`, { id: Number(id) });
+      }
+      throw error;
+    }
+  }));
 
-// --- email ---
 program
   .command("email <email>")
-  .description("Find tickets for a requester email")
-  .option("--status <status>", "Filter status: unresolved|all|new|open|pending|hold|solved|closed or comma-separated list", "unresolved")
+  .description("Find tickets for an assignee email")
+  .option("--status <status>", "unresolved|all|new|open|pending|hold|solved|closed or comma-separated list", "unresolved")
   .option("--limit <n>", "Max tickets to return", "20")
   .option("--sort <order>", "Sort order (asc|desc)", "desc")
-  .option("--json", "Output raw JSON")
-  .action(async (email, opts) => {
-    const limit = parseInt(opts.limit, 10);
+  .action(run(async (email: string, opts: { status: string; limit: string; sort: string }) => {
+    const limit = parseLimit(opts.limit);
+    const sort = parseSort(opts.sort);
     const statusFilter = parseStatusFilter(opts.status);
-    const canUseSearchStatus = opts.status === "unresolved" || statusFilter.length === 1;
-    const query = buildSearchQuery(`type:ticket requester:${email}`, opts.status, statusFilter, canUseSearchStatus);
-
-    const data = await apiGet<{ results: Ticket[] }>("/api/v2/search.json", {
+    const query = buildSearchQuery(`type:ticket assignee:${email}`, opts.status, statusFilter);
+    const data = await apiGet<{ results?: SearchTicket[] }>("/api/v2/search.json", {
       query,
       sort_by: "updated_at",
-      sort_order: opts.sort,
+      sort_order: sort,
       per_page: 100,
     });
+    const tickets = filterStatuses(data.results || [], opts.status, statusFilter).slice(0, limit);
+    printJson(tickets);
+  }));
 
-    let tickets = data.results || [];
-    if (statusFilter.length > 0 && opts.status !== "unresolved" && !canUseSearchStatus) {
-      tickets = tickets.filter((ticket) => statusFilter.includes((ticket.status || "").toLowerCase()));
-    }
-
-    tickets = tickets.slice(0, limit);
-
-    if (opts.json) {
-      console.log(JSON.stringify(tickets, null, 2));
-      return;
-    }
-
-    printTickets(tickets, (ticket) => {
-      return `    priority=${ticket.priority ?? "-"}  type=${ticket.type ?? "-"}  requester=${email}  updated=${ticket.updated_at}`;
-    });
-  });
-
-// --- follower ---
 program
-  .command("follower [email]")
+  .command("follower <email>")
   .description("Find tickets where the user is a follower but not the assignee")
-  .option("--status <status>", "Filter status: unresolved|all|new|open|pending|hold|solved|closed or comma-separated list", "unresolved")
+  .option("--status <status>", "unresolved|all|new|open|pending|hold|solved|closed or comma-separated list", "unresolved")
   .option("--limit <n>", "Max tickets to return", "20")
   .option("--sort <order>", "Sort order (asc|desc)", "desc")
-  .option("--json", "Output raw JSON")
-  .action(async (email, opts) => {
-    const targetEmail = email || getConfig().email;
-    const limit = parseInt(opts.limit, 10);
-    const tickets = await findFollowerTickets(targetEmail, opts.status, limit, opts.sort);
+  .action(run(async (email: string, opts: { status: string; limit: string; sort: string }) => {
+    const limit = parseLimit(opts.limit);
+    const sort = parseSort(opts.sort);
+    const tickets = await fetchFollowerTickets(email, opts.status, limit, sort);
+    printJson(tickets);
+  }));
 
-    if (opts.json) {
-      console.log(JSON.stringify(tickets, null, 2));
-      return;
-    }
-
-    printTickets(tickets, (ticket) => {
-      return `    priority=${ticket.priority ?? "-"}  type=${ticket.type ?? "-"}  follower=${targetEmail}  assignee=${ticket.assignee_id ?? "-"}  updated=${ticket.updated_at}`;
-    });
-  });
-
-// --- comments ---
 program
   .command("comments <ticketId>")
-  .description("List comments/thread for a ticket (public=customer-facing, internal=agents only)")
-  .option("--type <type>", "Filter: all|public|internal", "all")
+  .description("List comments for a ticket")
+  .option("--type <type>", "all|public|internal", "all")
   .option("--sort <order>", "Sort order (asc|desc)", "asc")
-  .option("--json", "Output raw JSON")
-  .action(async (ticketId, opts) => {
-    const data = await apiGet<{ comments: any[] }>(
+  .action(run(async (ticketId: string, opts: { type: string; sort: string }) => {
+    if (!DIGITS_RE.test(ticketId)) {
+      throw new CliError("invalid_args", "ticket id must be numeric", { ticketId });
+    }
+    const sort = parseSort(opts.sort);
+    if (!["all", "public", "internal"].includes(opts.type)) {
+      throw new CliError("invalid_args", "type must be all, public, or internal", { type: opts.type });
+    }
+
+    const data = await apiGet<{ comments?: Array<Record<string, unknown> & { public?: boolean }> }>(
       `/api/v2/tickets/${ticketId}/comments.json`,
-      { sort_order: opts.sort, per_page: 100 }
+      { sort_order: sort, per_page: 100 }
     );
 
     let comments = data.comments || [];
-    if (opts.type === "public") {
-      comments = comments.filter((c) => c.public === true);
-    } else if (opts.type === "internal") {
-      comments = comments.filter((c) => c.public === false);
-    }
+    if (opts.type === "public") comments = comments.filter((comment) => comment.public === true);
+    if (opts.type === "internal") comments = comments.filter((comment) => comment.public === false);
+    printJson(comments);
+  }));
 
-    if (opts.json) {
-      console.log(JSON.stringify(comments, null, 2));
-      return;
-    }
+function preprocessArgv(argv: string[]): string[] {
+  const firstArg = argv[2];
+  if (!firstArg || firstArg.startsWith("-") || KNOWN_COMMANDS.has(firstArg)) return argv;
+  if (EMAIL_RE.test(firstArg)) return [...argv.slice(0, 2), "email", ...argv.slice(2)];
+  if (DIGITS_RE.test(firstArg)) return [...argv.slice(0, 2), "ticket", ...argv.slice(2)];
+  return argv;
+}
 
-    for (const c of comments) {
-      const label = c.public ? "PUBLIC" : "INTERNAL";
-      const via = c.via?.channel ?? "?";
-      console.log(`--- [${label}] id=${c.id}  author=${c.author_id}  via=${via}  ${c.created_at} ---`);
-      const body = (c.plain_body || c.body || "").trim();
-      console.log(body);
-      console.log();
-    }
-  });
-
+process.argv = preprocessArgv(process.argv);
 program.parse();
