@@ -1,6 +1,6 @@
 {
   "name": "@tplog/zendcli",
-  "version": "0.2.3",
+  "version": "1.0.0",
   "description": "Minimal Zendesk CLI for tickets and comments",
   "repository": {
     "type": "git",
