@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 /**
  * zendcli - Minimal Zendesk CLI for tickets and comments.
  *
@@ -8,7 +7,7 @@
  */
 
 import { Command } from "commander";
-import { createInterface } from "readline/promises";
+import * as readline from "readline";
 import { loadConfig, saveConfig } from "./config";
 import { apiGet } from "./api";
 
@@ -17,12 +16,15 @@ const program = new Command();
 program.name("zend").description("Zendesk tickets & comments CLI").version("0.1.0");
 
 /** Interactive prompt helper. */
-async function prompt(question: string, defaultValue = "", hidden = false): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stderr });
-  const suffix = defaultValue ? ` [${hidden ? "****" : defaultValue}]` : "";
-  const answer = await rl.question(`${question}${suffix}: `);
-  rl.close();
-  return answer || defaultValue;
+function prompt(question: string, defaultValue = "", hidden = false): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+    const suffix = defaultValue ? ` [${hidden ? "****" : defaultValue}]` : "";
+    rl.question(`${question}${suffix}: `, (answer) => {
+      rl.close();
+      resolve(answer || defaultValue);
+    });
+  });
 }
 
 // --- configure ---
