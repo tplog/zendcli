@@ -1,7 +1,15 @@
 {
   "name": "@tplog/zendcli",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Minimal Zendesk CLI for tickets and comments",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tplog/zendcli.git"
+  },
+  "homepage": "https://github.com/tplog/zendcli#readme",
+  "bugs": {
+    "url": "https://github.com/tplog/zendcli/issues"
+  },
   "bin": {
     "zend": "dist/cli.js"
   },
