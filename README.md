@@ -1,6 +1,13 @@
 # zendcli
 
-Minimal Zendesk CLI for listing tickets and reading ticket comment threads.
+Minimal Zendesk CLI for listing tickets and reading ticket comment timelines.
+
+`zend comments` returns a slim timeline optimized for terminal review and LLM summarization. By default it includes both public and private comments and emits only:
+
+- `author`
+- `time`
+- `visibility` (`public` or `private`)
+- `body`
 
 ## Install
 
@@ -40,21 +47,35 @@ Environment variables take precedence over the config file.
 
 ```bash
 zend --help
-zend tickets --help
+zend ticket --help
 zend email --help
 zend follower --help
 zend comments --help
-zend tickets --limit 10
-zend tickets --status open --limit 20
+zend 12345
+zend ticket 12345 --raw
 zend email user@example.com
 zend email user@example.com --status unresolved
 zend email user@example.com --status open,pending
-zend follower
 zend follower user@example.com --limit 3
 zend comments 12345
-zend comments 12345 --type public
-zend comments 12345 --json
+zend comments 12345 --visibility public
+zend comments 12345 --visibility private --sort desc
 ```
+
+### Comments output shape
+
+```json
+[
+  {
+    "author": "Support Agent",
+    "time": "2026-03-13T06:19:57Z",
+    "visibility": "public",
+    "body": "Reply text..."
+  }
+]
+```
+
+Use `--visibility public` or `--visibility private` to filter the timeline.
 
 ## Development workflow
 

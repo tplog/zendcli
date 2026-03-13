@@ -19,6 +19,23 @@ type SearchTicket = Record<string, unknown> & {
 type User = {
   id: number;
   email?: string;
+  name?: string;
+};
+
+type ZendeskComment = Record<string, unknown> & {
+  id?: number;
+  author_id?: number;
+  created_at?: string;
+  public?: boolean;
+  plain_body?: string;
+  body?: string;
+};
+
+type SlimComment = {
+  author: string;
+  time: string | null;
+  visibility: "public" | "private";
+  body: string;
 };
 
 class CliError extends Error {
@@ -156,6 +173,13 @@ function parseSort(input = "desc"): "asc" | "desc" {
   return input;
 }
 
+function parseVisibility(input = "all"): "all" | "public" | "private" {
+  if (input !== "all" && input !== "public" && input !== "private") {
+    throw new CliError("invalid_args", "visibility must be all, public, or private", { visibility: input });
+  }
+  return input;
+}
+
 function buildSearchQuery(base: string, rawStatus: string, statusFilter: string[]): string {
   if (rawStatus === "unresolved") return `${base} status<solved`;
   if (statusFilter.length === 1) return `${base} status:${statusFilter[0]}`;
@@ -203,6 +227,50 @@ async function fetchFollowerTickets(email: string, rawStatus: string, limit: num
   }
 
   return matches;
+}
+
+async function fetchUsersByIds(ids: number[]): Promise<Map<number, User>> {
+  const userMap = new Map<number, User>();
+  const uniqueIds = [...new Set(ids)].filter((id) => Number.isFinite(id));
+
+  for (let index = 0; index < uniqueIds.length; index += 100) {
+    const chunk = uniqueIds.slice(index, index + 100);
+    try {
+      const data = await apiGet<{ users?: User[] }>("/api/v2/users/show_many.json", { ids: chunk.join(",") });
+      for (const user of data.users || []) {
+        userMap.set(user.id, user);
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) continue;
+      throw error;
+    }
+  }
+
+  return userMap;
+}
+
+function filterCommentsByVisibility(comments: ZendeskComment[], visibility: "all" | "public" | "private"): ZendeskComment[] {
+  if (visibility === "public") return comments.filter((comment) => comment.public === true);
+  if (visibility === "private") return comments.filter((comment) => comment.public === false);
+  return comments;
+}
+
+function normalizeCommentBody(comment: ZendeskComment): string {
+  return String(comment.plain_body || comment.body || "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\r/g, "")
+    .trim();
+}
+
+function toSlimComment(comment: ZendeskComment, userMap: Map<number, User>): SlimComment {
+  const authorId = typeof comment.author_id === "number" ? comment.author_id : null;
+  const author = authorId ? userMap.get(authorId)?.name || `user:${authorId}` : "unknown";
+  return {
+    author,
+    time: typeof comment.created_at === "string" ? comment.created_at : null,
+    visibility: comment.public === true ? "public" : "private",
+    body: normalizeCommentBody(comment),
+  };
 }
 
 function apiBaseUrl(): string {
@@ -301,27 +369,28 @@ program
 
 program
   .command("comments <ticketId>")
-  .description("List comments for a ticket")
-  .option("--type <type>", "all|public|internal", "all")
+  .description("List slim comment timeline for a ticket")
+  .option("--visibility <visibility>", "all|public|private", "all")
   .option("--sort <order>", "Sort order (asc|desc)", "asc")
-  .action(run(async (ticketId: string, opts: { type: string; sort: string }) => {
+  .action(run(async (ticketId: string, opts: { visibility: string; sort: string }) => {
     if (!DIGITS_RE.test(ticketId)) {
       throw new CliError("invalid_args", "ticket id must be numeric", { ticketId });
     }
-    const sort = parseSort(opts.sort);
-    if (!["all", "public", "internal"].includes(opts.type)) {
-      throw new CliError("invalid_args", "type must be all, public, or internal", { type: opts.type });
-    }
 
-    const data = await apiGet<{ comments?: Array<Record<string, unknown> & { public?: boolean }> }>(
+    const sort = parseSort(opts.sort);
+    const visibility = parseVisibility(opts.visibility);
+    const data = await apiGet<{ comments?: ZendeskComment[] }>(
       `/api/v2/tickets/${ticketId}/comments.json`,
       { sort_order: sort, per_page: 100 }
     );
 
-    let comments = data.comments || [];
-    if (opts.type === "public") comments = comments.filter((comment) => comment.public === true);
-    if (opts.type === "internal") comments = comments.filter((comment) => comment.public === false);
-    printJson(comments);
+    const comments = filterCommentsByVisibility(data.comments || [], visibility);
+    const authorIds = comments
+      .map((comment) => comment.author_id)
+      .filter((authorId): authorId is number => typeof authorId === "number");
+    const userMap = await fetchUsersByIds(authorIds);
+
+    printJson(comments.map((comment) => toSlimComment(comment, userMap)));
   }));
 
 function preprocessArgv(argv: string[]): string[] {

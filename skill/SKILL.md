@@ -59,7 +59,7 @@ This skill reflects the **v2 refactor** of `zendcli`:
 zend <id> [--raw]
 zend <email> [--status <status>] [--limit <n>] [--sort asc|desc]
 zend follower <email> [--status <status>] [--limit <n>] [--sort asc|desc]
-zend comments <ticketId> [--type all|public|internal] [--sort asc|desc]
+zend comments <ticketId> [--visibility all|public|private] [--sort asc|desc]
 zend configure
 ```
 
@@ -168,8 +168,21 @@ Semantics:
 
 ```bash
 zend comments 12345
-zend comments 12345 --type public
-zend comments 12345 --type internal
+zend comments 12345 --visibility public
+zend comments 12345 --visibility private
+```
+
+Default output is a slim timeline optimized for summarization:
+
+```json
+[
+  {
+    "author": "Support Agent",
+    "time": "2026-03-13T06:19:57Z",
+    "visibility": "public",
+    "body": "Reply text..."
+  }
+]
 ```
 
 ## API Mapping
@@ -189,6 +202,8 @@ The current CLI uses these Zendesk APIs:
 - If the user explicitly asks for follower tickets, use `zend follower <email>`.
 - If the user wants the thread for a known ticket, use `zend comments <id>`.
 - Since output is already JSON, summarize directly from stdout instead of asking for a JSON flag.
+- `zend comments <id>` returns a slim timeline with `author`, `time`, `visibility`, and `body`.
+- By default, `zend comments <id>` includes both public and private comments; use `--visibility` to filter.
 
 ## Troubleshooting
 
