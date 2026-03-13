@@ -30,7 +30,7 @@ This is the recommended option for temporary or CI usage.
 
 ```bash
 export ZENDESK_SUBDOMAIN="your-subdomain"
-export ZENDESK_EMAIL="foo@example.com"
+export ZENDESK_EMAIL="user@example.com"
 export ZENDESK_API_TOKEN="your_zendesk_api_token"
 ```
 
@@ -46,11 +46,11 @@ zend follower --help
 zend comments --help
 zend tickets --limit 10
 zend tickets --status open --limit 20
-zend email foo@example.com
-zend email foo@example.com --status unresolved
-zend email foo@example.com --status open,pending
+zend email user@example.com
+zend email user@example.com --status unresolved
+zend email user@example.com --status open,pending
 zend follower
-zend follower foo@example.com --limit 3
+zend follower user@example.com --limit 3
 zend comments 12345
 zend comments 12345 --type public
 zend comments 12345 --json
