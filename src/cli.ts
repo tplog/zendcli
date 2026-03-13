@@ -227,10 +227,26 @@ program
     printJson({ ok: true });
   }));
 
+const TICKET_SUMMARY_FIELDS = [
+  "id", "subject", "description", "status", "priority",
+  "created_at", "updated_at", "tags",
+  "requester_id", "assignee_id", "collaborator_ids", "follower_ids",
+  "organization_id", "group_id", "type", "via", "url",
+];
+
+function pickTicketFields(ticket: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of TICKET_SUMMARY_FIELDS) {
+    if (key in ticket) result[key] = ticket[key];
+  }
+  return result;
+}
+
 program
   .command("ticket <id>")
   .description("Get a single ticket")
-  .action(run(async (id: string) => {
+  .option("--raw", "Output full API response without field filtering")
+  .action(run(async (id: string, opts: { raw?: boolean }) => {
     if (!DIGITS_RE.test(id)) {
       throw new CliError("invalid_args", "ticket id must be numeric", { id });
     }
@@ -240,7 +256,7 @@ program
       if (!data.ticket) {
         throw new CliError("not_found", `Ticket ${id} not found`, { id: Number(id) });
       }
-      printJson(data.ticket);
+      printJson(opts.raw ? data.ticket : pickTicketFields(data.ticket as Record<string, unknown>));
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
         fail("not_found", `Ticket ${id} not found`, { id: Number(id) });
