@@ -1,7 +1,7 @@
 {
   "name": "@tplog/zendcli",
-  "version": "1.2.0",
-  "description": "Minimal Zendesk CLI for tickets and comments",
+  "version": "2.0.0",
+  "description": "Minimal Zendesk CLI for tickets and comments (Rust)",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tplog/zendcli.git"
@@ -11,22 +11,14 @@
     "url": "https://github.com/tplog/zendcli/issues"
   },
   "bin": {
-    "zend": "dist/cli.js"
+    "zend": "dist/zend"
   },
   "files": [
     "dist/"
   ],
   "scripts": {
-    "build": "rm -rf dist && npx esbuild src/cli.ts --bundle --platform=node --format=cjs --outfile=dist/cli.js && node -e \"const f='dist/cli.js';const fs=require('fs');fs.writeFileSync(f,'#!/usr/bin/env node\\n'+fs.readFileSync(f,'utf8'))\"",
+    "build": "cargo build --release && mkdir -p dist && cp target/release/zend dist/zend",
     "prepublishOnly": "npm run build",
-    "start": "node dist/cli.js"
-  },
-  "devDependencies": {
-    "esbuild": "^0.25.0",
-    "typescript": "^5.7.0",
-    "@types/node": "^22.0.0"
-  },
-  "dependencies": {
-    "commander": "^14.0.3"
+    "test": "cargo test"
   }
 }
