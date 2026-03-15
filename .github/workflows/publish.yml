@@ -83,7 +83,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
 
     steps:
       - name: Checkout
@@ -107,9 +106,6 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Ensure npm supports trusted publishing
-        run: npm install -g npm@latest
-
       - name: Verify tag matches package version
         run: |
           TAG="${GITHUB_REF_NAME}"
@@ -124,13 +120,13 @@ jobs:
           for dir in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
             echo "Publishing @tplog/zendcli-${dir}..."
             cd npm/${dir}
-            npm publish --access public --provenance
+            npm publish --access public
             cd ../..
           done
         env:
-          NPM_CONFIG_PROVENANCE: true
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish main package
-        run: npm publish --access public --provenance
+        run: npm publish --access public
         env:
-          NPM_CONFIG_PROVENANCE: true
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
