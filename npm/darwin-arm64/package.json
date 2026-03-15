@@ -1,0 +1,16 @@
+{
+  "name": "@tplog/zendcli-darwin-arm64",
+  "version": "1.3.1",
+  "description": "zendcli binary for macOS ARM64",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "bin": {
+    "zend": "zend"
+  },
+  "files": ["zend"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tplog/zendcli.git"
+  },
+  "license": "MIT"
+}

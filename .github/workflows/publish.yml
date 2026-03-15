@@ -11,7 +11,75 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            npm-dir: darwin-arm64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            npm-dir: darwin-x64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            npm-dir: linux-x64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            npm-dir: linux-arm64
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build Rust binary
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
+      - name: Prepare platform package
+        run: |
+          cp target/${{ matrix.target }}/release/zend npm/${{ matrix.npm-dir }}/zend
+          chmod +x npm/${{ matrix.npm-dir }}/zend
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-${{ matrix.npm-dir }}
+          path: npm/${{ matrix.npm-dir }}/
+
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test
+        run: cargo test
+
   publish:
+    needs: [build, test]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,20 +89,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
 
-      - name: Build Rust binary
-        run: cargo build --release
-
-      - name: Test
-        run: cargo test
-
-      - name: Prepare npm package
+      - name: Restore platform packages
         run: |
-          mkdir -p dist
-          cp target/release/zend dist/zend
-          chmod +x dist/zend
+          for dir in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            cp artifacts/npm-${dir}/zend npm/${dir}/zend 2>/dev/null || true
+            chmod +x npm/${dir}/zend 2>/dev/null || true
+          done
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -54,16 +119,18 @@ jobs:
             exit 1
           fi
 
-      - name: Check package version is unpublished
+      - name: Publish platform packages
         run: |
-          NAME=$(node -p "require('./package.json').name")
-          VERSION=$(node -p "require('./package.json').version")
-          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
-            echo "Version $NAME@$VERSION already exists on npm. Bump package.json version before publishing."
-            exit 1
-          fi
+          for dir in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            echo "Publishing @tplog/zendcli-${dir}..."
+            cd npm/${dir}
+            npm publish --access public --provenance
+            cd ../..
+          done
+        env:
+          NPM_CONFIG_PROVENANCE: true
 
-      - name: Publish package
+      - name: Publish main package
         run: npm publish --access public --provenance
         env:
           NPM_CONFIG_PROVENANCE: true
