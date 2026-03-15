@@ -265,6 +265,83 @@ fn test_api_error_structured_output() {
     assert!(v.get("message").is_some(), "should have 'message' field");
 }
 
+// ── Search command tests ──
+
+#[test]
+fn test_help_includes_search() {
+    let (stdout, _, code) = run_zend(&["--help"]);
+    assert_eq!(code, 0);
+    assert!(stdout.contains("search"), "help output should include search command");
+}
+
+#[test]
+fn test_search_missing_keyword() {
+    // `zend search` without keywords should fail (clap requires the argument)
+    let (stdout, _, code) = run_zend_with_env(&["search"], &[]);
+    assert_ne!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("should be valid JSON");
+    assert_eq!(v.get("error").unwrap().as_str().unwrap(), "invalid_args");
+    assert!(v.get("message").unwrap().as_str().unwrap().contains("KEYWORDS"));
+}
+
+#[test]
+fn test_search_missing_config() {
+    let (_stdout, stderr, code) = run_zend_with_env(&["search", "test keywords"], &[]);
+    assert_ne!(code, 0);
+    assert!(
+        stderr.contains("Not configured"),
+        "should show config missing hint, got: {stderr}"
+    );
+}
+
+#[test]
+fn test_search_invalid_limit() {
+    let (stdout, _, code) = run_zend_with_env(
+        &["search", "test", "--limit", "20"],
+        &[
+            ("ZENDESK_SUBDOMAIN", "test"),
+            ("ZENDESK_EMAIL", "test@test.com"),
+            ("ZENDESK_API_TOKEN", "fake"),
+        ],
+    );
+    assert_ne!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("should be valid JSON");
+    assert_eq!(v.get("error").unwrap().as_str().unwrap(), "invalid_args");
+    assert!(v.get("message").unwrap().as_str().unwrap().contains("1 and 10"));
+}
+
+#[test]
+fn test_search_invalid_status() {
+    let (stdout, _, code) = run_zend_with_env(
+        &["search", "test", "--status", "invalid"],
+        &[
+            ("ZENDESK_SUBDOMAIN", "test"),
+            ("ZENDESK_EMAIL", "test@test.com"),
+            ("ZENDESK_API_TOKEN", "fake"),
+        ],
+    );
+    assert_ne!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("should be valid JSON");
+    assert_eq!(v.get("error").unwrap().as_str().unwrap(), "invalid_args");
+}
+
+#[test]
+fn test_search_api_error() {
+    // With valid config but pointing to non-existent server
+    let (stdout, _, code) = run_zend_with_env(
+        &["search", "login failure"],
+        &[
+            ("ZENDESK_SUBDOMAIN", "nonexistent-test-domain-12345"),
+            ("ZENDESK_EMAIL", "test@test.com"),
+            ("ZENDESK_API_TOKEN", "fake-token"),
+        ],
+    );
+    assert_ne!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("should be valid JSON");
+    assert!(v.get("error").is_some(), "should have 'error' field");
+    assert!(v.get("message").is_some(), "should have 'message' field");
+}
+
 // ── Configure command tests ──
 
 #[test]

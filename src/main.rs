@@ -89,6 +89,20 @@ enum Commands {
         #[arg(long, default_value = "asc")]
         sort: String,
     },
+    /// Search tickets by keywords
+    Search {
+        /// Search keywords
+        keywords: String,
+        /// Filter by ticket status (open, pending, solved, etc.)
+        #[arg(long)]
+        status: Option<String>,
+        /// Max results to return (1-10, default 3)
+        #[arg(long, default_value = "3")]
+        limit: String,
+        /// Return full description without truncation
+        #[arg(long)]
+        full: bool,
+    },
 }
 
 fn is_email(s: &str) -> bool {
@@ -103,7 +117,7 @@ fn is_digits(s: &str) -> bool {
 /// Preprocess argv to route bare arguments to the right subcommand.
 fn preprocess_args(args: Vec<String>) -> Vec<String> {
     let known_commands: HashSet<&str> =
-        ["configure", "follower", "comments", "help", "email", "ticket"]
+        ["configure", "follower", "comments", "help", "email", "ticket", "search"]
             .iter()
             .copied()
             .collect();
@@ -170,6 +184,17 @@ fn parse_limit(input: &str) -> Result<usize, CliError> {
     })?;
     if limit < 1 || limit > 100 {
         return Err(CliError::new("invalid_args", "limit must be between 1 and 100")
+            .with_details(json!({ "limit": limit })));
+    }
+    Ok(limit)
+}
+
+fn parse_search_limit(input: &str) -> Result<usize, CliError> {
+    let limit: usize = input.parse().map_err(|_| {
+        CliError::new("invalid_args", "limit must be an integer").with_details(json!({ "limit": input }))
+    })?;
+    if limit < 1 || limit > 10 {
+        return Err(CliError::new("invalid_args", "limit must be between 1 and 10")
             .with_details(json!({ "limit": limit })));
     }
     Ok(limit)
@@ -352,6 +377,80 @@ fn prompt_hidden(question: &str, has_default: bool) -> String {
     let mut line = String::new();
     io::stdin().lock().read_line(&mut line).ok();
     line.trim().to_string()
+}
+
+fn truncate_str(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max_chars).collect();
+        format!("{truncated}...")
+    }
+}
+
+fn format_search_result(ticket: &Value, full: bool, subdomain: &str) -> Value {
+    let id = ticket.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+    let subject = ticket.get("subject").and_then(|v| v.as_str()).unwrap_or("");
+    let status = ticket.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    let created_at = ticket.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+    let description = ticket.get("description").and_then(|v| v.as_str()).unwrap_or("");
+
+    let desc_output = if full {
+        description.to_string()
+    } else {
+        truncate_str(description, 200)
+    };
+
+    json!({
+        "ticket_id": id,
+        "subject": subject,
+        "status": status,
+        "created_at": created_at,
+        "description": desc_output,
+        "url": format!("https://{}.zendesk.com/agent/tickets/{}", subdomain, id),
+    })
+}
+
+async fn run_search(
+    client: &Client,
+    keywords: &str,
+    status: &Option<String>,
+    limit_str: &str,
+    full: bool,
+) -> Result<(), ZendError> {
+    let limit = parse_search_limit(limit_str)?;
+
+    let mut query = format!("type:ticket {keywords}");
+    if let Some(ref s) = status {
+        // Validate status value
+        if !VALID_TICKET_STATUSES.contains(&s.as_str()) {
+            return Err(CliError::new("invalid_args", &format!("Invalid status: {s}"))
+                .with_details(json!({ "status": s }))
+                .into());
+        }
+        query = format!("{query} status:{s}");
+    }
+
+    let mut params = HashMap::new();
+    params.insert("query".to_string(), query);
+    params.insert("per_page".to_string(), limit.to_string());
+
+    let config = get_config().map_err(ZendError::Other)?;
+    let data = api_get(client, "/api/v2/search.json", &params).await?;
+    let results = data
+        .get("results")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let formatted: Vec<Value> = results
+        .iter()
+        .take(limit)
+        .map(|t| format_search_result(t, full, &config.subdomain))
+        .collect();
+
+    print_json(&Value::Array(formatted));
+    Ok(())
 }
 
 async fn run_configure() -> Result<(), ZendError> {
@@ -610,6 +709,12 @@ async fn main() {
             ref visibility,
             ref sort,
         } => run_comments(&client, ticket_id, visibility, sort).await,
+        Commands::Search {
+            ref keywords,
+            ref status,
+            ref limit,
+            full,
+        } => run_search(&client, keywords, status, limit, full).await,
     };
 
     if let Err(e) = result {
