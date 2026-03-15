@@ -35,7 +35,7 @@ const TICKET_SUMMARY_FIELDS: &[&str] = &[
 ];
 
 #[derive(Parser)]
-#[command(name = "zend", version = "1.3.1", about = "Zendesk tickets CLI")]
+#[command(name = "zend", version = "1.4.0", about = "Zendesk tickets CLI")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

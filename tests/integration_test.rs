@@ -241,7 +241,7 @@ fn test_help_output() {
 fn test_version_output() {
     let (stdout, _, code) = run_zend(&["--version"]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("1.3.1"));
+    assert!(stdout.contains("1.4.0"));
 }
 
 // ── Structured error output format tests ──
