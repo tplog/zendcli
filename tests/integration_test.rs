@@ -241,7 +241,7 @@ fn test_help_output() {
 fn test_version_output() {
     let (stdout, _, code) = run_zcli(&["--version"]);
     assert_eq!(code, 0);
-    assert!(stdout.contains("1.4.0"));
+    assert!(stdout.contains("1.4.2"));
 }
 
 // ── Structured error output format tests ──
