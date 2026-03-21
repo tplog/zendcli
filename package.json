@@ -1,6 +1,6 @@
 {
   "name": "@tplog/zendesk-cli",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Minimal Zendesk CLI for tickets and comments (Rust)",
   "repository": {
     "type": "git",
@@ -20,9 +20,9 @@
     "test": "cargo test"
   },
   "optionalDependencies": {
-    "@tplog/zendesk-cli-darwin-arm64": "1.4.0",
-    "@tplog/zendesk-cli-darwin-x64": "1.4.0",
-    "@tplog/zendesk-cli-linux-x64": "1.4.0",
-    "@tplog/zendesk-cli-linux-arm64": "1.4.0"
+    "@tplog/zendesk-cli-darwin-arm64": "1.4.1",
+    "@tplog/zendesk-cli-darwin-x64": "1.4.1",
+    "@tplog/zendesk-cli-linux-x64": "1.4.1",
+    "@tplog/zendesk-cli-linux-arm64": "1.4.1"
   }
 }
