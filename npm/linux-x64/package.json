@@ -1,6 +1,6 @@
 {
   "name": "@tplog/zendesk-cli-linux-x64",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "zendesk-cli binary for Linux x64",
   "os": ["linux"],
   "cpu": ["x64"],
