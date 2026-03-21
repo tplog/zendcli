@@ -1,6 +1,6 @@
 {
   "name": "@tplog/zendesk-cli-darwin-arm64",
-  "version": "1.4.2",
+  "version": "1.4.1",
   "description": "zendesk-cli binary for macOS ARM64",
   "os": ["darwin"],
   "cpu": ["arm64"],
