@@ -1,27 +1,27 @@
 use std::process::Command;
 use tempfile::TempDir;
 
-fn zend_bin() -> String {
+fn zcli_bin() -> String {
     let mut path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("target");
     path.push("debug");
-    path.push("zend");
+    path.push("zcli");
     path.to_string_lossy().to_string()
 }
 
-fn run_zend(args: &[&str]) -> (String, String, i32) {
-    let output = Command::new(zend_bin())
+fn run_zcli(args: &[&str]) -> (String, String, i32) {
+    let output = Command::new(zcli_bin())
         .args(args)
         .output()
-        .expect("failed to execute zend");
+        .expect("failed to execute zcli");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let code = output.status.code().unwrap_or(-1);
     (stdout, stderr, code)
 }
 
-fn run_zend_with_env(args: &[&str], env: &[(&str, &str)]) -> (String, String, i32) {
-    let mut cmd = Command::new(zend_bin());
+fn run_zcli_with_env(args: &[&str], env: &[(&str, &str)]) -> (String, String, i32) {
+    let mut cmd = Command::new(zcli_bin());
     cmd.args(args);
     // Clear Zendesk env vars to avoid interference
     cmd.env_remove("ZENDESK_SUBDOMAIN");
@@ -33,7 +33,7 @@ fn run_zend_with_env(args: &[&str], env: &[(&str, &str)]) -> (String, String, i3
     // Use a temp HOME to avoid reading real config
     let tmp = TempDir::new().unwrap();
     cmd.env("HOME", tmp.path());
-    let output = cmd.output().expect("failed to execute zend");
+    let output = cmd.output().expect("failed to execute zcli");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let code = output.status.code().unwrap_or(-1);
@@ -44,15 +44,15 @@ fn run_zend_with_env(args: &[&str], env: &[(&str, &str)]) -> (String, String, i3
 
 #[test]
 fn test_numeric_argv_routing() {
-    // `zend 99999` should route to `zend ticket 99999`
+    // `zcli 99999` should route to `zcli ticket 99999`
     // Both should produce the same error (API error, since domain is fake)
     let env = &[
         ("ZENDESK_SUBDOMAIN", "test-routing"),
         ("ZENDESK_EMAIL", "test@test.com"),
         ("ZENDESK_API_TOKEN", "fake"),
     ];
-    let (stdout1, _, code1) = run_zend_with_env(&["99999"], env);
-    let (stdout2, _, code2) = run_zend_with_env(&["ticket", "99999"], env);
+    let (stdout1, _, code1) = run_zcli_with_env(&["99999"], env);
+    let (stdout2, _, code2) = run_zcli_with_env(&["ticket", "99999"], env);
 
     // Both should fail (API unreachable)
     assert_ne!(code1, 0);
@@ -69,14 +69,14 @@ fn test_numeric_argv_routing() {
 
 #[test]
 fn test_email_argv_routing() {
-    // `zend user@example.com` should route to `zend email user@example.com`
+    // `zcli user@example.com` should route to `zcli email user@example.com`
     let env = &[
         ("ZENDESK_SUBDOMAIN", "test-routing"),
         ("ZENDESK_EMAIL", "test@test.com"),
         ("ZENDESK_API_TOKEN", "fake"),
     ];
-    let (stdout1, _, code1) = run_zend_with_env(&["user@example.com"], env);
-    let (stdout2, _, code2) = run_zend_with_env(&["email", "user@example.com"], env);
+    let (stdout1, _, code1) = run_zcli_with_env(&["user@example.com"], env);
+    let (stdout2, _, code2) = run_zcli_with_env(&["email", "user@example.com"], env);
 
     assert_ne!(code1, 0);
     assert_ne!(code2, 0);
@@ -94,7 +94,7 @@ fn test_email_argv_routing() {
 
 #[test]
 fn test_missing_config_error() {
-    let (_stdout, stderr, code) = run_zend_with_env(&["12345"], &[]);
+    let (_stdout, stderr, code) = run_zcli_with_env(&["12345"], &[]);
 
     assert_ne!(code, 0, "should exit with non-zero when config is missing");
 
@@ -109,7 +109,7 @@ fn test_missing_config_error() {
 
 #[test]
 fn test_ticket_non_numeric_id_error() {
-    let (stdout, _, code) = run_zend_with_env(
+    let (stdout, _, code) = run_zcli_with_env(
         &["ticket", "abc"],
         &[
             ("ZENDESK_SUBDOMAIN", "test"),
@@ -126,7 +126,7 @@ fn test_ticket_non_numeric_id_error() {
 
 #[test]
 fn test_comments_non_numeric_id_error() {
-    let (stdout, _, code) = run_zend_with_env(
+    let (stdout, _, code) = run_zcli_with_env(
         &["comments", "abc"],
         &[
             ("ZENDESK_SUBDOMAIN", "test"),
@@ -143,7 +143,7 @@ fn test_comments_non_numeric_id_error() {
 
 #[test]
 fn test_invalid_sort_error() {
-    let (stdout, _, code) = run_zend_with_env(
+    let (stdout, _, code) = run_zcli_with_env(
         &["email", "user@test.com", "--sort", "invalid"],
         &[
             ("ZENDESK_SUBDOMAIN", "test"),
@@ -159,7 +159,7 @@ fn test_invalid_sort_error() {
 
 #[test]
 fn test_invalid_visibility_error() {
-    let (stdout, _, code) = run_zend_with_env(
+    let (stdout, _, code) = run_zcli_with_env(
         &["comments", "123", "--visibility", "invalid"],
         &[
             ("ZENDESK_SUBDOMAIN", "test"),
@@ -175,7 +175,7 @@ fn test_invalid_visibility_error() {
 
 #[test]
 fn test_invalid_limit_error() {
-    let (stdout, _, code) = run_zend_with_env(
+    let (stdout, _, code) = run_zcli_with_env(
         &["email", "user@test.com", "--limit", "999"],
         &[
             ("ZENDESK_SUBDOMAIN", "test"),
@@ -205,7 +205,7 @@ fn test_env_overrides_file_config() {
 
     // Run with env var override for subdomain - the command will fail trying to connect
     // but we can verify the error references the env subdomain, not the file one
-    let mut cmd = Command::new(zend_bin());
+    let mut cmd = Command::new(zcli_bin());
     cmd.args(["ticket", "1"]);
     cmd.env_remove("ZENDESK_SUBDOMAIN");
     cmd.env_remove("ZENDESK_EMAIL");
@@ -227,7 +227,7 @@ fn test_env_overrides_file_config() {
 
 #[test]
 fn test_help_output() {
-    let (stdout, _, code) = run_zend(&["--help"]);
+    let (stdout, _, code) = run_zcli(&["--help"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("Zendesk tickets CLI"));
     assert!(stdout.contains("configure"));
@@ -239,7 +239,7 @@ fn test_help_output() {
 
 #[test]
 fn test_version_output() {
-    let (stdout, _, code) = run_zend(&["--version"]);
+    let (stdout, _, code) = run_zcli(&["--version"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("1.4.0"));
 }
@@ -249,7 +249,7 @@ fn test_version_output() {
 #[test]
 fn test_api_error_structured_output() {
     // With valid config but pointing to non-existent server
-    let (stdout, _, code) = run_zend_with_env(
+    let (stdout, _, code) = run_zcli_with_env(
         &["ticket", "12345"],
         &[
             ("ZENDESK_SUBDOMAIN", "nonexistent-test-domain-12345"),
@@ -269,15 +269,15 @@ fn test_api_error_structured_output() {
 
 #[test]
 fn test_help_includes_search() {
-    let (stdout, _, code) = run_zend(&["--help"]);
+    let (stdout, _, code) = run_zcli(&["--help"]);
     assert_eq!(code, 0);
     assert!(stdout.contains("search"), "help output should include search command");
 }
 
 #[test]
 fn test_search_missing_keyword() {
-    // `zend search` without keywords should fail (clap requires the argument)
-    let (stdout, _, code) = run_zend_with_env(&["search"], &[]);
+    // `zcli search` without keywords should fail (clap requires the argument)
+    let (stdout, _, code) = run_zcli_with_env(&["search"], &[]);
     assert_ne!(code, 0);
     let v: serde_json::Value = serde_json::from_str(&stdout).expect("should be valid JSON");
     assert_eq!(v.get("error").unwrap().as_str().unwrap(), "invalid_args");
@@ -286,7 +286,7 @@ fn test_search_missing_keyword() {
 
 #[test]
 fn test_search_missing_config() {
-    let (_stdout, stderr, code) = run_zend_with_env(&["search", "test keywords"], &[]);
+    let (_stdout, stderr, code) = run_zcli_with_env(&["search", "test keywords"], &[]);
     assert_ne!(code, 0);
     assert!(
         stderr.contains("Not configured"),
@@ -296,7 +296,7 @@ fn test_search_missing_config() {
 
 #[test]
 fn test_search_invalid_limit() {
-    let (stdout, _, code) = run_zend_with_env(
+    let (stdout, _, code) = run_zcli_with_env(
         &["search", "test", "--limit", "20"],
         &[
             ("ZENDESK_SUBDOMAIN", "test"),
@@ -312,7 +312,7 @@ fn test_search_invalid_limit() {
 
 #[test]
 fn test_search_invalid_status() {
-    let (stdout, _, code) = run_zend_with_env(
+    let (stdout, _, code) = run_zcli_with_env(
         &["search", "test", "--status", "invalid"],
         &[
             ("ZENDESK_SUBDOMAIN", "test"),
@@ -328,7 +328,7 @@ fn test_search_invalid_status() {
 #[test]
 fn test_search_api_error() {
     // With valid config but pointing to non-existent server
-    let (stdout, _, code) = run_zend_with_env(
+    let (stdout, _, code) = run_zcli_with_env(
         &["search", "login failure"],
         &[
             ("ZENDESK_SUBDOMAIN", "nonexistent-test-domain-12345"),
@@ -348,7 +348,7 @@ fn test_search_api_error() {
 fn test_configure_writes_config() {
     let tmp = TempDir::new().unwrap();
 
-    let mut cmd = Command::new(zend_bin());
+    let mut cmd = Command::new(zcli_bin());
     cmd.arg("configure");
     cmd.env_remove("ZENDESK_SUBDOMAIN");
     cmd.env_remove("ZENDESK_EMAIL");

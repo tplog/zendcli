@@ -7,7 +7,7 @@ repository = "https://github.com/tplog/zendcli"
 license = "MIT"
 
 [[bin]]
-name = "zend"
+name = "zcli"
 path = "src/main.rs"
 
 [dependencies]

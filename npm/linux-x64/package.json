@@ -1,13 +1,13 @@
 {
-  "name": "@tplog/zendcli-linux-x64",
+  "name": "@tplog/zendesk-cli-linux-x64",
   "version": "1.4.0",
-  "description": "zendcli binary for Linux x64",
+  "description": "zendesk-cli binary for Linux x64",
   "os": ["linux"],
   "cpu": ["x64"],
   "bin": {
-    "zend": "zend"
+    "zcli": "zcli"
   },
-  "files": ["zend"],
+  "files": ["zcli"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tplog/zendcli.git"

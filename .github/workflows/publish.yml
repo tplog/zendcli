@@ -54,8 +54,8 @@ jobs:
 
       - name: Prepare platform package
         run: |
-          cp target/${{ matrix.target }}/release/zend npm/${{ matrix.npm-dir }}/zend
-          chmod +x npm/${{ matrix.npm-dir }}/zend
+          cp target/${{ matrix.target }}/release/zcli npm/${{ matrix.npm-dir }}/zcli
+          chmod +x npm/${{ matrix.npm-dir }}/zcli
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -96,8 +96,8 @@ jobs:
       - name: Restore platform packages
         run: |
           for dir in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
-            cp artifacts/npm-${dir}/zend npm/${dir}/zend 2>/dev/null || true
-            chmod +x npm/${dir}/zend 2>/dev/null || true
+            cp artifacts/npm-${dir}/zcli npm/${dir}/zcli 2>/dev/null || true
+            chmod +x npm/${dir}/zcli 2>/dev/null || true
           done
 
       - name: Setup Node.js
@@ -118,7 +118,7 @@ jobs:
       - name: Publish platform packages
         run: |
           for dir in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
-            echo "Publishing @tplog/zendcli-${dir}..."
+            echo "Publishing @tplog/zendesk-cli-${dir}..."
             cd npm/${dir}
             npm publish --access public
             cd ../..

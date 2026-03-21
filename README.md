@@ -1,8 +1,8 @@
-# zendcli
+# zendesk-cli
 
 Minimal Zendesk CLI for listing tickets and reading ticket comment timelines.
 
-`zend comments` returns a slim timeline optimized for terminal review and LLM summarization. By default it includes both public and private comments and emits only:
+`zcli comments` returns a slim timeline optimized for terminal review and LLM summarization. By default it includes both public and private comments and emits only:
 
 - `author`
 - `time`
@@ -12,7 +12,7 @@ Minimal Zendesk CLI for listing tickets and reading ticket comment timelines.
 ## Install
 
 ```bash
-npm install -g @tplog/zendcli
+npm install -g @tplog/zendesk-cli
 ```
 
 ## Configure
@@ -20,7 +20,7 @@ npm install -g @tplog/zendcli
 ### Option 1: interactive setup
 
 ```bash
-zend configure
+zcli configure
 ```
 
 Credentials are stored locally in:
@@ -46,20 +46,20 @@ Environment variables take precedence over the config file.
 ## Usage
 
 ```bash
-zend --help
-zend ticket --help
-zend email --help
-zend follower --help
-zend comments --help
-zend 12345
-zend ticket 12345 --raw
-zend email user@example.com
-zend email user@example.com --status unresolved
-zend email user@example.com --status open,pending
-zend follower user@example.com --limit 3
-zend comments 12345
-zend comments 12345 --visibility public
-zend comments 12345 --visibility private --sort desc
+zcli --help
+zcli ticket --help
+zcli email --help
+zcli follower --help
+zcli comments --help
+zcli 12345
+zcli ticket 12345 --raw
+zcli email user@example.com
+zcli email user@example.com --status unresolved
+zcli email user@example.com --status open,pending
+zcli follower user@example.com --limit 3
+zcli comments 12345
+zcli comments 12345 --visibility public
+zcli comments 12345 --visibility private --sort desc
 ```
 
 ### Comments output shape

@@ -1,13 +1,13 @@
 {
-  "name": "@tplog/zendcli-darwin-x64",
+  "name": "@tplog/zendesk-cli-darwin-x64",
   "version": "1.4.0",
-  "description": "zendcli binary for macOS x64",
+  "description": "zendesk-cli binary for macOS x64",
   "os": ["darwin"],
   "cpu": ["x64"],
   "bin": {
-    "zend": "zend"
+    "zcli": "zcli"
   },
-  "files": ["zend"],
+  "files": ["zcli"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tplog/zendcli.git"
